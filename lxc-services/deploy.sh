@@ -27,7 +27,7 @@ echo
 
 # Copy receiver files
 echo "[1/4] Deploying audio receiver..."
-cp audio-receiver/receiver.py /opt/audio-receiver/oyment script for LXC services
+cp audio-receiver/receiver.py /opt/audio-receiver/ # Deployment script for LXC services
 # Run this after setup.sh to deploy the services
 
 set -e
