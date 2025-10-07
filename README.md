@@ -5,12 +5,14 @@ Server-side components for ESP32-S3 audio streaming system.
 **Aligned with**: `audio-streamer-xiao` firmware v2.0
 
 ## Quick Links
+
 - [Architecture](#architecture) | [Installation](#installation) | [Configuration](#configuration)
 - [Services](#services) | [Environment Variables](#environment-variables) | [Monitoring](#monitoring)
 
 ## Architecture
 
 ### System Overview
+
 ```
 ESP32-S3 (XIAO)                    LXC Container / Server
 ┌──────────────────┐               ┌──────────────────────────────┐
@@ -38,6 +40,7 @@ ESP32-S3 (XIAO)                    LXC Container / Server
 ### Audio Format Alignment
 
 **ESP32-S3 Firmware Configuration** (`config.h`):
+
 ```cpp
 #define SAMPLE_RATE 16000        // 16 kHz
 #define BITS_PER_SAMPLE 16       // 16-bit
@@ -50,6 +53,7 @@ const size_t send_samples = 9600;
 ```
 
 **Server Configuration** (aligned):
+
 ```python
 # receiver.py & app.py
 SAMPLE_RATE = 16000          # 16 kHz (matches firmware)
@@ -63,6 +67,7 @@ SEGMENT_DURATION = 600       # 10 minutes per WAV file
 ### Performance Characteristics
 
 **Network:**
+
 - Raw bandwidth: 256 kbps (16000 Hz × 16 bits)
 - TCP overhead: ~280 kbps actual
 - Chunk rate: 5 chunks/second (200ms intervals)
@@ -70,12 +75,14 @@ SEGMENT_DURATION = 600       # 10 minutes per WAV file
 - Latency: 200-500ms (buffering + network)
 
 **Storage:**
+
 - File size: ~19.2 MB per 10-minute segment
 - Hourly: ~115 MB
 - Daily: ~2.76 GB
 - Monthly: ~82.9 GB
 
 **Memory:**
+
 - ESP32: 96 KB ring buffer (internal SRAM)
 - Server: 64 KB TCP receive buffer
 
@@ -86,6 +93,7 @@ SEGMENT_DURATION = 600       # 10 minutes per WAV file
 TCP server that receives raw audio from ESP32 and saves as WAV segments.
 
 **Features:**
+
 - TCP server on port 9000
 - Receives 16-bit PCM audio at 16 kHz
 - Saves 10-minute WAV segments
@@ -94,6 +102,7 @@ TCP server that receives raw audio from ESP32 and saves as WAV segments.
 - Logging to `/var/log/audio-receiver.log`
 
 **File Organization:**
+
 ```
 /data/audio/
 ├── 2025-01-08/
@@ -106,6 +115,7 @@ TCP server that receives raw audio from ESP32 and saves as WAV segments.
 ```
 
 **WAV Format:**
+
 - PCM uncompressed
 - 16-bit samples (little-endian)
 - 16000 Hz sample rate
@@ -117,6 +127,7 @@ TCP server that receives raw audio from ESP32 and saves as WAV segments.
 Flask web interface for browsing and playing archived audio.
 
 **Features:**
+
 - Browse recordings by date
 - In-browser audio playback
 - Download WAV files
@@ -125,6 +136,7 @@ Flask web interface for browsing and playing archived audio.
 - Responsive design
 
 **Endpoints:**
+
 - `GET /` - Main page (date list)
 - `GET /date/<YYYY-MM-DD>` - Files for specific date
 - `GET /stream/<date>/<file>` - Stream audio for playback
@@ -133,6 +145,7 @@ Flask web interface for browsing and playing archived audio.
 - `GET /api/latest` - Latest recordings
 
 **Security:**
+
 - HTTP Basic Authentication on all endpoints
 - Path traversal protection
 - File access validation
@@ -140,10 +153,34 @@ Flask web interface for browsing and playing archived audio.
 
 ## Installation
 
+### Quick Start (Recommended - LXC Container)
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/sarpel/audio-receiver-xiao.git
+cd audio-receiver-xiao
+
+# 2. Run setup script (installs dependencies and creates directories)
+sudo bash setup.sh
+
+# 3. Configure credentials (IMPORTANT - change default password!)
+export WEB_UI_USERNAME="admin"
+export WEB_UI_PASSWORD="your-secure-password-here"
+
+# 4. Deploy services (copies files and starts systemd services)
+sudo bash deploy.sh
+
+# 5. Verify services are running
+sudo systemctl status audio-receiver
+sudo systemctl status web-ui
+```
+
 ### Option 1: Direct Python (for testing)
 
 ```bash
-cd lxc-services
+# Clone repository
+git clone https://github.com/sarpel/audio-receiver-xiao.git
+cd audio-receiver-xiao
 
 # Install dependencies
 pip install -r audio-receiver/requirements.txt
@@ -168,40 +205,57 @@ python3 app.py
 ### Option 2: Systemd Services (production)
 
 ```bash
-# Copy service files
-sudo cp systemd/audio-receiver.service /etc/systemd/system/
-sudo cp systemd/audio-web-ui.service /etc/systemd/system/
+# Clone repository
+git clone https://github.com/sarpel/audio-receiver-xiao.git
+cd audio-receiver-xiao
 
-# Set environment variables
-sudo cp systemd/audio-services.env /etc/default/audio-services
-sudo nano /etc/default/audio-services  # Edit credentials
+# Run setup script (installs dependencies)
+sudo bash setup.sh
 
-# Enable and start services
-sudo systemctl daemon-reload
-sudo systemctl enable audio-receiver audio-web-ui
-sudo systemctl start audio-receiver audio-web-ui
+# Set environment variables before deploying
+export WEB_UI_USERNAME="admin"
+export WEB_UI_PASSWORD="your-secure-password-here"
+
+# Deploy services (uses the automated deploy.sh script)
+sudo bash deploy.sh
 
 # Check status
 sudo systemctl status audio-receiver
-sudo systemctl status audio-web-ui
+sudo systemctl status web-ui
 ```
 
-### Option 3: LXC Container (recommended)
+### Option 3: LXC Container (recommended for production)
 
 ```bash
-# Create LXC container
-lxc-create -t download -n audio-server -- -d ubuntu -r jammy -a amd64
+# On host: Create LXC container
+lxc-create -t download -n audio-server -- -d debian -r bookworm -a amd64
 
-# Start and configure
+# Start container
 lxc-start -n audio-server
+
+# Attach to container
 lxc-attach -n audio-server
 
-# Inside container: install dependencies
-apt update && apt install -y python3 python3-pip
-pip3 install -r /mnt/lxc-services/audio-receiver/requirements.txt
-pip3 install -r /mnt/lxc-services/web-ui/requirements.txt
+# Inside container: Clone repository
+apt update && apt install -y git
+git clone https://github.com/sarpel/audio-receiver-xiao.git
+cd audio-receiver-xiao
 
-# Configure systemd services (see Option 2)
+# Run setup script
+bash setup.sh
+
+# Set credentials and deploy
+export WEB_UI_USERNAME="admin"
+export WEB_UI_PASSWORD="your-secure-password-here"
+bash deploy.sh
+
+# Exit container
+exit
+
+# On host: Check container IP
+lxc-ls --fancy
+
+# Access web UI at: http://[container-ip]:8080
 ```
 
 ## Configuration
@@ -209,6 +263,7 @@ pip3 install -r /mnt/lxc-services/web-ui/requirements.txt
 ### Environment Variables
 
 **Required for Web UI:**
+
 ```bash
 # Authentication credentials (REQUIRED for security)
 export WEB_UI_USERNAME="admin"                    # Default: admin
@@ -216,6 +271,7 @@ export WEB_UI_PASSWORD="your-secure-password"     # Default: changeme (CHANGE TH
 ```
 
 **Optional for ESP32 Firmware** (build-time):
+
 ```bash
 # WiFi credentials (optional, can be set in config.h instead)
 export WIFI_SSID="YourNetworkName"
@@ -353,6 +409,7 @@ curl -u admin:password http://localhost:8080/api/latest
 ### Receiver Issues
 
 **Problem: Receiver won't start**
+
 ```bash
 # Check if port is already in use
 sudo netstat -tuln | grep 9000
@@ -365,6 +422,7 @@ sudo systemctl restart audio-receiver
 ```
 
 **Problem: ESP32 can't connect**
+
 ```bash
 # Verify server IP is reachable from ESP32
 ping 192.168.1.50
@@ -377,6 +435,7 @@ nc -l 9000
 ```
 
 **Problem: No WAV files created**
+
 ```bash
 # Check data directory permissions
 ls -ld /data/audio
@@ -390,6 +449,7 @@ sudo tcpdump -i eth0 port 9000 -X
 ```
 
 **Problem: Corrupted audio / wrong format**
+
 ```bash
 # Verify receiver configuration matches ESP32
 grep SAMPLE_RATE audio-receiver/receiver.py  # Should be 16000
@@ -403,6 +463,7 @@ ffmpeg -i /data/audio/2025-01-08/2025-01-08_1200.wav
 ### Web UI Issues
 
 **Problem: Can't access web UI**
+
 ```bash
 # Check if service is running
 sudo systemctl status audio-web-ui
@@ -415,6 +476,7 @@ curl http://localhost:8080
 ```
 
 **Problem: Authentication fails**
+
 ```bash
 # Check environment variables
 echo $WEB_UI_USERNAME
@@ -428,6 +490,7 @@ sudo systemctl restart audio-web-ui
 ```
 
 **Problem: Files don't show in UI**
+
 ```bash
 # Check DATA_DIR matches receiver
 grep DATA_DIR web-ui/app.py
@@ -443,6 +506,7 @@ sudo journalctl -u audio-web-ui -f
 ### Network Issues
 
 **Problem: Frequent disconnections**
+
 ```bash
 # Check WiFi signal strength on ESP32 (serial monitor)
 # Should be > -70 dBm
@@ -458,6 +522,7 @@ watch -n1 'netstat -ant | grep 9000'
 ```
 
 **Problem: Buffer overflows on ESP32**
+
 ```bash
 # Check ESP32 serial monitor logs for overflow warnings
 # Increase ring buffer size in firmware config.h if needed
@@ -582,12 +647,13 @@ WEB_UI_PASSWORD=changeme
 
 ### ESP32 Firmware (build-time, optional)
 
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
-| `WIFI_SSID` | WiFi network name | (defined in config.h) | No |
-| `WIFI_PASSWORD` | WiFi password | (defined in config.h) | No |
+| Variable        | Description       | Default               | Required |
+| --------------- | ----------------- | --------------------- | -------- |
+| `WIFI_SSID`     | WiFi network name | (defined in config.h) | No       |
+| `WIFI_PASSWORD` | WiFi password     | (defined in config.h) | No       |
 
 **Usage:**
+
 ```bash
 # Option 1: Build with environment variables
 export WIFI_SSID="MyNetwork"
@@ -601,12 +667,13 @@ idf.py build
 
 ### Server Services (runtime, required for web UI)
 
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
-| `WEB_UI_USERNAME` | Web UI username | `admin` | Yes (for security) |
+| Variable          | Description     | Default    | Required               |
+| ----------------- | --------------- | ---------- | ---------------------- |
+| `WEB_UI_USERNAME` | Web UI username | `admin`    | Yes (for security)     |
 | `WEB_UI_PASSWORD` | Web UI password | `changeme` | **Yes** (MUST change!) |
 
 **Usage:**
+
 ```bash
 # Option 1: Export in shell
 export WEB_UI_USERNAME="admin"
@@ -674,6 +741,7 @@ MIT License - See LICENSE file for details
 ## Version History
 
 **v2.0** (Current)
+
 - Aligned with ESP32-S3 firmware v2.0
 - Changed from 24-bit/48kHz to 16-bit/16kHz
 - Updated TCP chunk size to 19200 bytes (200ms at 16kHz)
@@ -683,6 +751,7 @@ MIT License - See LICENSE file for details
 - Added threading support to Flask
 
 **v1.0**
+
 - Initial release
 - 24-bit/48kHz audio support
 - Basic TCP receiver and web UI

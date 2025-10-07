@@ -1,6 +1,34 @@
 #!/bin/bash
 # Deployment script for LXC services
 # Run this after setup.sh to deploy the services
+# Usage: sudo bash deploy.sh (from repository root)
+
+set -e
+
+echo "=== Deploying Audio Streaming Services ==="
+echo
+
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+    echo "ERROR: Please run as root"
+    exit 1
+fi
+
+# Validate we're in the correct directory
+if [ ! -f "audio-receiver/receiver.py" ] || [ ! -f "web-ui/app.py" ]; then
+    echo "ERROR: This script must be run from the lxc-services repository root"
+    echo "Current directory: $(pwd)"
+    echo "Expected files: audio-receiver/receiver.py, web-ui/app.py"
+    exit 1
+fi
+
+echo "Running from: $(pwd)"
+echo
+
+# Copy receiver files
+echo "[1/4] Deploying audio receiver..."
+cp audio-receiver/receiver.py /opt/audio-receiver/oyment script for LXC services
+# Run this after setup.sh to deploy the services
 
 set -e
 

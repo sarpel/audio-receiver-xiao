@@ -1,11 +1,18 @@
 #!/bin/bash
 # LXC Container Setup Script for Audio Streaming System
 # Run this script inside the Debian 12 LXC container
+# Usage: sudo bash setup.sh
 
 set -e
 
 echo "=== Audio Streaming LXC Container Setup ==="
 echo
+
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+    echo "ERROR: Please run as root"
+    exit 1
+fi
 
 # Update system
 echo "[1/7] Updating system packages..."
@@ -68,15 +75,20 @@ EOF
 echo
 echo "=== Setup Complete ==="
 echo
-echo "Next steps(deploy.sh):"
-echo "1. Copy receiver.py to /opt/audio-receiver/"
-echo "2. Copy web UI files to /opt/web-ui/"
-echo "3. Copy systemd service files to /etc/systemd/system/"
-echo "4. Run: systemctl daemon-reload"
-echo "5. Run: systemctl enable audio-receiver web-ui"
-echo "6. Run: systemctl start audio-receiver web-ui"
+echo "Next steps:"
+echo "1. Clone or copy the lxc-services repository to the container"
+echo "2. cd to the repository root directory"
+echo "3. Run: sudo bash deploy.sh"
+echo ""
+echo "The deploy.sh script will:"
+echo "  - Copy receiver.py to /opt/audio-receiver/"
+echo "  - Copy web UI files to /opt/web-ui/"
+echo "  - Copy systemd service files to /etc/systemd/system/"
+echo "  - Enable and start both services"
 echo
 echo "Data will be stored in: /data/audio"
 echo "TCP receiver listening on: port 9000"
+echo "Web UI accessible on: http://[container-ip]:8080"
+echo
 echo "Web UI accessible on: http://[container-ip]:8080"
 echo
