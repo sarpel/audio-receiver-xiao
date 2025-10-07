@@ -29,7 +29,7 @@ apt install -y \
 
 # Install Python dependencies
 echo "[3/7] Installing Python dependencies..."
-pip3 install flask --break-system-packages
+pip3 install flask>=2.3.0  Flask-HTTPAuth>=4.8.0 Werkzeug>=2.3.0 --break-system-packages
 
 # Create directories
 echo "[4/7] Creating directories..."
@@ -68,7 +68,7 @@ EOF
 echo
 echo "=== Setup Complete ==="
 echo
-echo "Next steps:"
+echo "Next steps(deploy.sh):"
 echo "1. Copy receiver.py to /opt/audio-receiver/"
 echo "2. Copy web UI files to /opt/web-ui/"
 echo "3. Copy systemd service files to /etc/systemd/system/"
