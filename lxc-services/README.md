@@ -6,8 +6,9 @@ Server-side components for ESP32-S3 audio streaming system.
 
 ## Quick Links
 
-- [Architecture](#architecture) | [Installation](#installation) | [Configuration](#configuration)
+- [Architecture](#architecture) | [Compression](#compression-features) | [Installation](#installation) | [Configuration](#configuration)
 - [Services](#services) | [Environment Variables](#environment-variables) | [Monitoring](#monitoring)
+- **[📚 Compression Guide](COMPRESSION_GUIDE.md)** - Detailed compression documentation
 
 ## Architecture
 
@@ -85,6 +86,61 @@ SEGMENT_DURATION = 600       # 10 minutes per WAV file
 
 - ESP32: 96 KB ring buffer (internal SRAM)
 - Server: 64 KB TCP receive buffer
+
+## Compression Features
+
+**NEW:** Automatic audio compression to save storage space with minimal quality loss!
+
+### Overview
+
+The receiver now automatically compresses completed 10-minute WAV segments using ffmpeg. After a segment is written, the system:
+
+1. Waits 10 seconds to ensure file is fully written
+2. Compresses in background thread (non-blocking)
+3. Deletes original WAV (optional)
+4. Logs compression statistics
+
+### Supported Formats
+
+**FLAC (Default - Recommended):**
+- **Type:** Lossless compression
+- **Reduction:** ~50% (19.2 MB → ~9.6 MB)
+- **Quality:** Perfect (bit-for-bit identical)
+- **Speed:** ~3 seconds per 10-minute segment
+- **Storage:** ~41.5 GB/month (vs 82.9 GB uncompressed)
+
+**Opus (Maximum Compression):**
+- **Type:** Lossy compression (VoIP optimized)
+- **Reduction:** ~98% at 64kbps (19.2 MB → ~0.5 MB)
+- **Quality:** Excellent for speech, transparent at 96kbps
+- **Speed:** ~5 seconds per 10-minute segment
+- **Storage:** ~2.1 GB/month (vs 82.9 GB uncompressed)
+
+### Quick Start
+
+**1. Install ffmpeg:**
+```bash
+sudo apt install ffmpeg
+```
+
+**2. Configuration (receiver.py):**
+```python
+ENABLE_COMPRESSION = True           # Enable/disable
+COMPRESSION_FORMAT = 'flac'         # 'flac' or 'opus'
+COMPRESSION_DELAY = 10              # Wait 10s after segment
+DELETE_ORIGINAL_WAV = True          # Remove WAV after compression
+```
+
+**3. Format-specific settings:**
+```python
+# FLAC (lossless)
+FLAC_COMPRESSION_LEVEL = 5          # 0-8 (default: 5)
+
+# Opus (lossy)
+OPUS_BITRATE = 64                   # kbps (64 for speech, 96 for music)
+```
+
+**For complete documentation, see [COMPRESSION_GUIDE.md](COMPRESSION_GUIDE.md)**
 
 ## Services
 

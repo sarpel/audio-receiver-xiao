@@ -2,7 +2,7 @@
 """
 Audio Stream Receiver
 Receives raw PCM audio from ESP32-S3 via TCP and saves as WAV segments.
-Supports both 16-bit and 24-bit formats.
+Supports automatic compression to FLAC or Opus formats for storage efficiency.
 """
 
 import socket
@@ -10,6 +10,8 @@ import struct
 import time
 import os
 import sys
+import subprocess
+import threading
 from datetime import datetime
 from pathlib import Path
 import logging
@@ -31,6 +33,24 @@ TCP_HOST = '0.0.0.0'
 
 # TCP buffer size aligned with firmware (200ms chunks from ESP32)
 TCP_CHUNK_SIZE = 19200   # 9600 samples × 2 bytes = 19200 bytes
+
+# Compression Configuration
+# Automatically compress WAV files after segment completion to save storage space
+ENABLE_COMPRESSION = True           # Set to False to disable compression
+COMPRESSION_FORMAT = 'flac'         # Options: 'flac' (lossless ~50% reduction) or 'opus' (lossy ~98% reduction)
+COMPRESSION_DELAY = 10              # Wait 10 seconds after segment completion before compressing
+DELETE_ORIGINAL_WAV = True          # Delete uncompressed WAV after successful compression
+
+# Format-specific settings
+# FLAC: Lossless compression, ~50% size reduction (19.2 MB → ~9.6 MB)
+# - Best for: Archival, highest quality, moderate space savings
+# - Quality: Perfect (lossless)
+FLAC_COMPRESSION_LEVEL = 5          # 0-8, higher = better compression but slower (5 = default)
+
+# Opus: Lossy compression, ~98% size reduction (19.2 MB → ~0.5 MB at 64kbps)
+# - Best for: Speech, maximum space savings, near-transparent quality
+# - Quality: Excellent for speech at 64kbps, transparent at 96kbps
+OPUS_BITRATE = 64                   # kbps, recommended: 64 for speech, 96 for music, 128 for high quality
 
 # Logging setup
 logging.basicConfig(
@@ -86,6 +106,112 @@ def start_new_segment():
     write_wav_header(f, SEGMENT_SIZE)
 
     return f, SEGMENT_SIZE, filepath
+
+
+def compress_audio(wav_filepath):
+    """
+    Compress WAV file to FLAC or Opus format using ffmpeg.
+    Runs in background thread after COMPRESSION_DELAY seconds.
+    Deletes original WAV file after successful compression if DELETE_ORIGINAL_WAV is True.
+
+    Args:
+        wav_filepath: Path to the WAV file to compress
+    """
+    try:
+        # Wait before compression to ensure file is fully written and closed
+        logger.info(f"Compression scheduled for {wav_filepath} in {COMPRESSION_DELAY} seconds")
+        time.sleep(COMPRESSION_DELAY)
+
+        wav_path = Path(wav_filepath)
+
+        # Check if WAV file still exists
+        if not wav_path.exists():
+            logger.warning(f"WAV file no longer exists: {wav_filepath}")
+            return
+
+        # Only compress complete segments (at least 5 minutes of audio)
+        # 16000 Hz × 2 bytes × 300 sec = 9.6 MB minimum
+        min_file_size = 9600000  # 9.6 MB
+        actual_size = wav_path.stat().st_size
+        if actual_size < min_file_size:
+            logger.info(f"Skipping compression of partial segment: {wav_path.name} ({actual_size / 1024 / 1024:.2f} MB)")
+            return
+
+        # Determine output format and build ffmpeg command
+        if COMPRESSION_FORMAT.lower() == 'flac':
+            # FLAC: Lossless compression
+            output_path = wav_path.with_suffix('.flac')
+            cmd = [
+                'ffmpeg',
+                '-i', str(wav_path),
+                '-y',  # Overwrite output file if exists
+                '-compression_level', str(FLAC_COMPRESSION_LEVEL),
+                '-loglevel', 'error',  # Only show errors
+                str(output_path)
+            ]
+            format_name = 'FLAC'
+
+        elif COMPRESSION_FORMAT.lower() == 'opus':
+            # Opus: Lossy compression optimized for speech
+            output_path = wav_path.with_suffix('.opus')
+            cmd = [
+                'ffmpeg',
+                '-i', str(wav_path),
+                '-y',
+                '-c:a', 'libopus',
+                '-b:a', f'{OPUS_BITRATE}k',
+                '-vbr', 'on',  # Variable bitrate for better quality
+                '-compression_level', '10',  # Maximum compression efficiency
+                '-application', 'voip',  # Optimized for speech (alternatives: audio, lowdelay)
+                '-loglevel', 'error',
+                str(output_path)
+            ]
+            format_name = 'Opus'
+
+        else:
+            logger.error(f"Unknown compression format: {COMPRESSION_FORMAT}")
+            return
+
+        # Get original file size
+        original_size = wav_path.stat().st_size
+
+        logger.info(f"Compressing {wav_path.name} to {format_name}...")
+
+        # Run ffmpeg compression
+        start_time = time.time()
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        compression_time = time.time() - start_time
+
+        if result.returncode != 0:
+            logger.error(f"Compression failed: {result.stderr}")
+            return
+
+        # Check if output file was created successfully
+        if not output_path.exists():
+            logger.error(f"Compression output file not created: {output_path}")
+            return
+
+        # Get compressed file size
+        compressed_size = output_path.stat().st_size
+        reduction_percent = ((original_size - compressed_size) / original_size) * 100
+
+        logger.info(f"Compression complete: {output_path.name}")
+        logger.info(f"  Original: {original_size / 1024 / 1024:.2f} MB")
+        logger.info(f"  Compressed: {compressed_size / 1024 / 1024:.2f} MB")
+        logger.info(f"  Reduction: {reduction_percent:.1f}% ({compression_time:.1f}s)")
+
+        # Delete original WAV file if configured
+        if DELETE_ORIGINAL_WAV:
+            try:
+                wav_path.unlink()
+                logger.info(f"Deleted original WAV: {wav_path.name}")
+            except Exception as e:
+                logger.error(f"Failed to delete original WAV: {e}")
+
+    except subprocess.TimeoutExpired:
+        logger.error(f"Compression timeout (>300s) for {wav_filepath}")
+    except Exception as e:
+        logger.error(f"Compression error for {wav_filepath}: {e}")
 
 
 def tcp_server():
@@ -147,6 +273,16 @@ def tcp_server():
 
                         current_file.close()
 
+                        # Trigger compression in background thread if enabled
+                        if ENABLE_COMPRESSION:
+                            compression_thread = threading.Thread(
+                                target=compress_audio,
+                                args=(str(current_path),),
+                                daemon=True,
+                                name=f"Compress-{current_path.name}"
+                            )
+                            compression_thread.start()
+
                         # Start new segment
                         current_file, bytes_left, current_path = start_new_segment()
                         segment_start_time = time.time()
@@ -180,6 +316,33 @@ def main():
     logger.info(f"Configuration: {SAMPLE_RATE} Hz, {BITS_PER_SAMPLE}-bit, {CHANNELS} channel(s)")
     logger.info(f"Segment size: {SEGMENT_SIZE / 1024 / 1024:.2f} MB ({SEGMENT_DURATION} seconds)")
     logger.info(f"Listening on: {TCP_HOST}:{TCP_PORT}")
+
+    # Compression configuration
+    if ENABLE_COMPRESSION:
+        logger.info(f"Compression: ENABLED ({COMPRESSION_FORMAT.upper()})")
+        if COMPRESSION_FORMAT.lower() == 'flac':
+            logger.info(f"  Format: FLAC (lossless, ~50% reduction, level {FLAC_COMPRESSION_LEVEL})")
+        elif COMPRESSION_FORMAT.lower() == 'opus':
+            logger.info(f"  Format: Opus ({OPUS_BITRATE} kbps, ~98% reduction, VoIP optimized)")
+        logger.info(f"  Delay: {COMPRESSION_DELAY}s after segment completion")
+        logger.info(f"  Delete original: {'YES' if DELETE_ORIGINAL_WAV else 'NO'}")
+
+        # Check if ffmpeg is available
+        try:
+            result = subprocess.run(['ffmpeg', '-version'], capture_output=True, timeout=5)
+            if result.returncode == 0:
+                logger.info("  ffmpeg: Available")
+            else:
+                logger.error("  ffmpeg: Not working properly")
+                logger.warning("  Compression will be disabled!")
+        except FileNotFoundError:
+            logger.error("  ffmpeg: NOT FOUND")
+            logger.error("  Install ffmpeg: apt install ffmpeg")
+            logger.warning("  Compression will fail without ffmpeg!")
+        except Exception as e:
+            logger.warning(f"  ffmpeg check failed: {e}")
+    else:
+        logger.info("Compression: DISABLED")
 
     # Check if data directory exists
     if not os.path.exists(DATA_DIR):

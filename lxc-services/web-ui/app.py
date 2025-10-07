@@ -68,7 +68,7 @@ def get_audio_files(date_folder):
 
     files = []
     for item in folder_path.iterdir():
-        if item.is_file() and item.suffix.lower() in ['.wav', '.flac']:
+        if item.is_file() and item.suffix.lower() in ['.wav', '.flac', '.opus']:
             files.append({
                 'name': item.name,
                 'size': item.stat().st_size,
@@ -166,7 +166,15 @@ def stream(date_folder, filename):
     except ValueError:
         abort(403)
 
-    return send_file(file_path, mimetype='audio/wav')
+    # Determine MIME type based on file extension
+    mime_types = {
+        '.wav': 'audio/wav',
+        '.flac': 'audio/flac',
+        '.opus': 'audio/opus'
+    }
+    mimetype = mime_types.get(file_path.suffix.lower(), 'audio/wav')
+
+    return send_file(file_path, mimetype=mimetype)
 
 
 @app.route('/api/stats')
