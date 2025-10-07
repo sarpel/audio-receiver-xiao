@@ -1,0 +1,9 @@
+# Audio Receiver Dependencies
+# Python 3.7+ required
+
+# No external dependencies required - uses only Python standard library:
+# - socket: TCP server
+# - struct: Binary data packing
+# - logging: Application logging
+# - pathlib: File system operations
+# - datetime: Timestamp generation
